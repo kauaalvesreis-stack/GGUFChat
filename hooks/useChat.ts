@@ -2,13 +2,14 @@
 import { useState, useCallback, useRef } from 'react';
 import { ChatMessage, ChatSession, generateCompletion } from '@/services/llamaService';
 import { useApp } from './useApp';
+import { buildRagContext } from '@/services/ragService';
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 export function useChat() {
-  const { serverUrl, params, systemPrompt, updateSession } = useApp();
+  const { serverUrl, params, systemPrompt, updateSession, ragDocuments, ragEnabled } = useApp();
   const [isGenerating, setIsGenerating] = useState(false);
   const abortRef = useRef(false);
 
@@ -45,22 +46,27 @@ export function useChat() {
       onUpdate(updatedWithUser);
       setIsGenerating(true);
 
+      // Build system prompt with optional RAG context
+      let effectiveSystemPrompt = systemPrompt;
+      if (ragEnabled && ragDocuments.length > 0) {
+        const ragCtx = buildRagContext(userText, ragDocuments);
+        if (ragCtx) effectiveSystemPrompt = systemPrompt + ragCtx;
+      }
+
       let accumulated = '';
 
       await generateCompletion(
         serverUrl,
         [...session.messages, userMsg],
         params,
-        systemPrompt,
+        effectiveSystemPrompt,
         (token) => {
           if (abortRef.current) return;
           accumulated += token;
           const streamingSession: ChatSession = {
             ...updatedWithUser,
             messages: updatedWithUser.messages.map((m) =>
-              m.id === aiMsgId
-                ? { ...m, content: accumulated, isStreaming: true }
-                : m
+              m.id === aiMsgId ? { ...m, content: accumulated, isStreaming: true } : m
             ),
           };
           onUpdate(streamingSession);
@@ -69,9 +75,7 @@ export function useChat() {
           const finalSession: ChatSession = {
             ...updatedWithUser,
             messages: updatedWithUser.messages.map((m) =>
-              m.id === aiMsgId
-                ? { ...m, content: accumulated, isStreaming: false }
-                : m
+              m.id === aiMsgId ? { ...m, content: accumulated, isStreaming: false } : m
             ),
             updatedAt: Date.now(),
           };
@@ -83,13 +87,7 @@ export function useChat() {
           const errorSession: ChatSession = {
             ...updatedWithUser,
             messages: updatedWithUser.messages.map((m) =>
-              m.id === aiMsgId
-                ? {
-                    ...m,
-                    content: `[Erro: ${err}]`,
-                    isStreaming: false,
-                  }
-                : m
+              m.id === aiMsgId ? { ...m, content: `[Erro: ${err}]`, isStreaming: false } : m
             ),
             updatedAt: Date.now(),
           };
@@ -99,7 +97,7 @@ export function useChat() {
         }
       );
     },
-    [serverUrl, params, systemPrompt, isGenerating, updateSession]
+    [serverUrl, params, systemPrompt, isGenerating, updateSession, ragDocuments, ragEnabled]
   );
 
   const stopGeneration = useCallback(() => {

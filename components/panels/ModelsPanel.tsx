@@ -14,26 +14,25 @@ import { LlamaModel } from '@/services/llamaService';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { GlowButton } from '@/components/ui/GlowButton';
 import { AddModelModal } from '@/components/modals/AddModelModal';
+import { HuggingFaceModal } from '@/components/modals/HuggingFaceModal';
 import { useAlert } from '@/template';
 
 export function ModelsPanel() {
   const { models, addModel, removeModel, activeModelId, setActiveModelId, serverStatus } = useApp();
   const { showAlert } = useAlert();
   const [showAdd, setShowAdd] = useState(false);
+  const [showHF, setShowHF] = useState(false);
 
   function confirmRemove(model: LlamaModel) {
     showAlert('Remover modelo', `Remover "${model.name}" da lista?`, [
       { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Remover',
-        style: 'destructive',
-        onPress: () => removeModel(model.id),
-      },
+      { text: 'Remover', style: 'destructive', onPress: () => removeModel(model.id) },
     ]);
   }
 
   function renderModel({ item }: { item: LlamaModel }) {
     const isActive = item.id === activeModelId;
+    const isUrl = item.path.startsWith('http');
     return (
       <Pressable
         onPress={() => setActiveModelId(isActive ? null : item.id)}
@@ -45,15 +44,12 @@ export function ModelsPanel() {
       >
         <View style={styles.modelLeft}>
           <MaterialIcons
-            name="memory"
+            name={isUrl ? 'cloud' : 'memory'}
             size={18}
             color={isActive ? Colors.primary : Colors.textSecondary}
           />
           <View style={styles.modelInfo}>
-            <Text
-              style={[styles.modelName, isActive && { color: Colors.primary }]}
-              numberOfLines={1}
-            >
+            <Text style={[styles.modelName, isActive && { color: Colors.primary }]} numberOfLines={1}>
               {item.name}
             </Text>
             <Text style={styles.modelPath} numberOfLines={1}>
@@ -96,18 +92,24 @@ export function ModelsPanel() {
         />
       )}
 
-      <GlowButton
-        label="+ Adicionar Modelo"
-        onPress={() => setShowAdd(true)}
-        size="sm"
-        style={styles.addBtn}
-      />
+      <View style={styles.buttons}>
+        <GlowButton
+          label="+ Adicionar"
+          onPress={() => setShowAdd(true)}
+          size="sm"
+          style={{ flex: 1 }}
+        />
+        <GlowButton
+          label="HuggingFace"
+          onPress={() => setShowHF(true)}
+          size="sm"
+          variant="secondary"
+          style={{ flex: 1 }}
+        />
+      </View>
 
-      <AddModelModal
-        visible={showAdd}
-        onClose={() => setShowAdd(false)}
-        onAdd={addModel}
-      />
+      <AddModelModal visible={showAdd} onClose={() => setShowAdd(false)} onAdd={addModel} />
+      <HuggingFaceModal visible={showHF} onClose={() => setShowHF(false)} />
     </View>
   );
 }
@@ -189,7 +191,9 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     textAlign: 'center',
   },
-  addBtn: {
+  buttons: {
+    flexDirection: 'row',
+    gap: Spacing.xs,
     margin: Spacing.md,
   },
 });

@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, Spacing, FontSize, Radius } from '@/constants/theme';
+import { FavoritePromptsModal } from '@/components/modals/FavoritePromptsModal';
 
 interface Props {
   onSend: (text: string) => void;
@@ -20,6 +21,7 @@ interface Props {
 
 export function ChatInput({ onSend, onStop, isGenerating, disabled }: Props) {
   const [text, setText] = useState('');
+  const [showFavs, setShowFavs] = useState(false);
 
   function handleSend() {
     if (!text.trim()) return;
@@ -27,9 +29,20 @@ export function ChatInput({ onSend, onStop, isGenerating, disabled }: Props) {
     setText('');
   }
 
+  function handleUseFavorite(content: string) {
+    setText(content);
+  }
+
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={styles.container}>
+        <Pressable
+          onPress={() => setShowFavs(true)}
+          style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}
+          hitSlop={8}
+        >
+          <MaterialIcons name="star" size={18} color={Colors.warning} />
+        </Pressable>
         <TextInput
           style={styles.input}
           value={text}
@@ -61,6 +74,12 @@ export function ChatInput({ onSend, onStop, isGenerating, disabled }: Props) {
           />
         </Pressable>
       </View>
+
+      <FavoritePromptsModal
+        visible={showFavs}
+        onClose={() => setShowFavs(false)}
+        onUse={handleUseFavorite}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -75,6 +94,13 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.surfaceBorder,
     gap: Spacing.sm,
+  },
+  iconBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   input: {
     flex: 1,

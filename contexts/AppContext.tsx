@@ -14,6 +14,12 @@ import {
   loadParams,
   saveSystemPrompt,
   loadSystemPrompt,
+  saveFavoritePrompts,
+  loadFavoritePrompts,
+  saveRagDocuments,
+  loadRagDocuments,
+  FavoritePrompt,
+  RagDocument,
 } from '@/services/storageService';
 import { DEFAULT_PARAMS, SYSTEM_PROMPT_DEFAULT } from '@/constants/config';
 
@@ -46,6 +52,18 @@ export interface AppContextType {
   systemPrompt: string;
   setSystemPrompt: (s: string) => Promise<void>;
 
+  // Favorite Prompts
+  favoritePrompts: FavoritePrompt[];
+  addFavoritePrompt: (name: string, content: string) => Promise<void>;
+  removeFavoritePrompt: (id: string) => Promise<void>;
+
+  // RAG Documents
+  ragDocuments: RagDocument[];
+  addRagDocument: (doc: RagDocument) => Promise<void>;
+  removeRagDocument: (id: string) => Promise<void>;
+  ragEnabled: boolean;
+  setRagEnabled: (v: boolean) => void;
+
   isLoading: boolean;
 }
 
@@ -55,7 +73,7 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function getSessionTitle(modelId: string): string {
+function getSessionTitle(): string {
   const now = new Date();
   return `Chat ${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR', {
     hour: '2-digit',
@@ -75,6 +93,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeSessionId, _setActiveSessionId] = useState<string | null>(null);
   const [params, _setParams] = useState<GenerationParams>(DEFAULT_PARAMS);
   const [systemPrompt, _setSystemPrompt] = useState(SYSTEM_PROMPT_DEFAULT);
+  const [favoritePrompts, setFavoritePrompts] = useState<FavoritePrompt[]>([]);
+  const [ragDocuments, setRagDocuments] = useState<RagDocument[]>([]);
+  const [ragEnabled, setRagEnabled] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -86,6 +107,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         storedActiveId,
         storedParams,
         storedPrompt,
+        storedFavs,
+        storedRag,
       ] = await Promise.all([
         loadSessions(),
         loadModels(),
@@ -93,6 +116,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loadActiveSessionId(),
         loadParams(),
         loadSystemPrompt(),
+        loadFavoritePrompts(),
+        loadRagDocuments(),
       ]);
       setSessions(storedSessions);
       setModels(storedModels);
@@ -100,6 +125,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       _setActiveSessionId(storedActiveId);
       if (storedParams) _setParams(storedParams);
       if (storedPrompt) _setSystemPrompt(storedPrompt);
+      setFavoritePrompts(storedFavs);
+      setRagDocuments(storedRag);
       setIsLoading(false);
     }
     init();
@@ -131,27 +158,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (id) await saveActiveSessionId(id);
   }, []);
 
-  const createSession = useCallback(
-    async (modelId: string): Promise<ChatSession> => {
-      const session: ChatSession = {
-        id: generateId(),
-        title: getSessionTitle(modelId),
-        modelId,
-        messages: [],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      setSessions((prev) => {
-        const next = [session, ...prev];
-        saveSessions(next);
-        return next;
-      });
-      await saveActiveSessionId(session.id);
-      _setActiveSessionId(session.id);
-      return session;
-    },
-    []
-  );
+  const createSession = useCallback(async (modelId: string): Promise<ChatSession> => {
+    const session: ChatSession = {
+      id: generateId(),
+      title: getSessionTitle(),
+      modelId,
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    setSessions((prev) => {
+      const next = [session, ...prev];
+      saveSessions(next);
+      return next;
+    });
+    await saveActiveSessionId(session.id);
+    _setActiveSessionId(session.id);
+    return session;
+  }, []);
 
   const updateSession = useCallback(async (session: ChatSession) => {
     setSessions((prev) => {
@@ -180,6 +204,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await saveSystemPrompt(s);
   }, []);
 
+  const addFavoritePrompt = useCallback(async (name: string, content: string) => {
+    const prompt: FavoritePrompt = { id: generateId(), name, content, createdAt: Date.now() };
+    setFavoritePrompts((prev) => {
+      const next = [prompt, ...prev];
+      saveFavoritePrompts(next);
+      return next;
+    });
+  }, []);
+
+  const removeFavoritePrompt = useCallback(async (id: string) => {
+    setFavoritePrompts((prev) => {
+      const next = prev.filter((p) => p.id !== id);
+      saveFavoritePrompts(next);
+      return next;
+    });
+  }, []);
+
+  const addRagDocument = useCallback(async (doc: RagDocument) => {
+    setRagDocuments((prev) => {
+      const next = [doc, ...prev];
+      saveRagDocuments(next);
+      return next;
+    });
+  }, []);
+
+  const removeRagDocument = useCallback(async (id: string) => {
+    setRagDocuments((prev) => {
+      const next = prev.filter((d) => d.id !== id);
+      saveRagDocuments(next);
+      return next;
+    });
+  }, []);
+
   return (
     <AppContext.Provider
       value={{
@@ -203,6 +260,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setParams,
         systemPrompt,
         setSystemPrompt,
+        favoritePrompts,
+        addFavoritePrompt,
+        removeFavoritePrompt,
+        ragDocuments,
+        addRagDocument,
+        removeRagDocument,
+        ragEnabled,
+        setRagEnabled,
         isLoading,
       }}
     >

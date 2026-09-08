@@ -8,6 +8,7 @@ import {
   Pressable,
   Dimensions,
   Platform,
+  Share,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -19,8 +20,11 @@ import { ChatSession } from '@/services/llamaService';
 import { checkServerStatus } from '@/services/llamaService';
 import { MessageBubble, ChatInput, ModelsPanel, HistoryPanel, SettingsModal } from '@/components';
 import { StatusDot } from '@/components/ui/StatusDot';
+import { RagModal } from '@/components/modals/RagModal';
+import { estimateSessionTokens } from '@/services/ragService';
 
 const PANEL_WIDTH = 260;
+const MAX_CTX_TOKENS = 4096;
 
 type SidePanel = 'models' | 'history' | null;
 
@@ -37,6 +41,8 @@ export default function ChatScreen() {
     serverStatus,
     setServerStatus,
     params,
+    ragDocuments,
+    ragEnabled,
     isLoading,
   } = useApp();
   const { sendMessage, stopGeneration, isGenerating } = useChat();
@@ -44,6 +50,7 @@ export default function ChatScreen() {
   const [currentSession, setCurrentSession] = useState<ChatSession | null>(null);
   const [sidePanel, setSidePanel] = useState<SidePanel>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showRag, setShowRag] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
   const dims = Dimensions.get('window');
@@ -57,18 +64,12 @@ export default function ChatScreen() {
     }
     poll();
     const interval = setInterval(poll, 10000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
+    return () => { cancelled = true; clearInterval(interval); };
   }, [serverUrl]);
 
   // Sync current session with store
   useEffect(() => {
-    if (!activeSessionId) {
-      setCurrentSession(null);
-      return;
-    }
+    if (!activeSessionId) { setCurrentSession(null); return; }
     const found = sessions.find((s) => s.id === activeSessionId);
     if (found) setCurrentSession(found);
   }, [activeSessionId, sessions]);
@@ -88,9 +89,7 @@ export default function ChatScreen() {
 
   function handleSend(text: string) {
     if (!currentSession) {
-      handleNewChat().then(() => {
-        // Will be sent after session is created via effect
-      });
+      handleNewChat().then(() => {});
       return;
     }
     sendMessage(currentSession, text, (updated) => {
@@ -100,10 +99,27 @@ export default function ChatScreen() {
     });
   }
 
+  async function handleExport() {
+    if (!currentSession || currentSession.messages.length === 0) return;
+    const lines = currentSession.messages.map((m) => {
+      const role = m.role === 'user' ? 'Você' : 'AI';
+      const time = new Date(m.timestamp).toLocaleString('pt-BR');
+      return `[${role}] ${time}\n${m.content}`;
+    });
+    const content = `# ${currentSession.title}\n\n${lines.join('\n\n---\n\n')}`;
+    try {
+      await Share.share({ message: content, title: currentSession.title });
+    } catch {
+      // ignore
+    }
+  }
+
   function togglePanel(panel: SidePanel) {
     setSidePanel((prev) => (prev === panel ? null : panel));
   }
 
+  const contextTokens = currentSession ? estimateSessionTokens(currentSession.messages) : 0;
+  const contextPercent = Math.min((contextTokens / MAX_CTX_TOKENS) * 100, 100);
   const isEmpty = !currentSession || currentSession.messages.length === 0;
   const isNarrow = dims.width < 700;
 
@@ -136,6 +152,22 @@ export default function ChatScreen() {
         </View>
 
         <View style={styles.headerRight}>
+          {/* RAG toggle */}
+          <Pressable onPress={() => setShowRag(true)} style={styles.headerBtn} hitSlop={8}>
+            <MaterialIcons
+              name="auto-awesome"
+              size={20}
+              color={ragEnabled && ragDocuments.length > 0 ? Colors.accent : Colors.textSecondary}
+            />
+          </Pressable>
+          {/* Export */}
+          <Pressable onPress={handleExport} style={styles.headerBtn} hitSlop={8} disabled={isEmpty}>
+            <MaterialIcons
+              name="ios-share"
+              size={20}
+              color={isEmpty ? Colors.textMuted : Colors.textSecondary}
+            />
+          </Pressable>
           <Pressable onPress={handleNewChat} style={styles.headerBtn} hitSlop={8}>
             <MaterialIcons name="add-comment" size={22} color={Colors.textSecondary} />
           </Pressable>
@@ -145,9 +177,31 @@ export default function ChatScreen() {
         </View>
       </View>
 
+      {/* Context window bar */}
+      {contextTokens > 0 ? (
+        <View style={styles.ctxBar}>
+          <Text style={styles.ctxLabel}>
+            Contexto: {contextTokens.toLocaleString()} / {MAX_CTX_TOKENS} tokens
+          </Text>
+          <View style={styles.ctxTrack}>
+            <View
+              style={[
+                styles.ctxFill,
+                {
+                  width: `${contextPercent}%` as `${number}%`,
+                  backgroundColor: contextPercent > 80 ? Colors.error : contextPercent > 60 ? Colors.warning : Colors.primary,
+                },
+              ]}
+            />
+          </View>
+          {contextPercent > 75 ? (
+            <Text style={styles.ctxWarn}>⚠ Janela quase cheia</Text>
+          ) : null}
+        </View>
+      ) : null}
+
       {/* Body */}
       <View style={styles.body}>
-        {/* Side panel */}
         {sidePanel !== null ? (
           <View style={[styles.panel, { width: isNarrow ? dims.width * 0.72 : PANEL_WIDTH }]}>
             {sidePanel === 'models' ? (
@@ -158,7 +212,6 @@ export default function ChatScreen() {
           </View>
         ) : null}
 
-        {/* Chat area */}
         <View style={styles.chat}>
           {isEmpty ? (
             <View style={styles.welcome}>
@@ -178,6 +231,12 @@ export default function ChatScreen() {
                   <View style={[styles.badge, { borderColor: Colors.accent }]}>
                     <MaterialIcons name="memory" size={12} color={Colors.accent} />
                     <Text style={[styles.badgeText, { color: Colors.accent }]}>Modelo selecionado</Text>
+                  </View>
+                ) : null}
+                {ragEnabled && ragDocuments.length > 0 ? (
+                  <View style={[styles.badge, { borderColor: Colors.accent }]}>
+                    <MaterialIcons name="auto-awesome" size={12} color={Colors.accent} />
+                    <Text style={[styles.badgeText, { color: Colors.accent }]}>RAG ativo ({ragDocuments.length} docs)</Text>
                   </View>
                 ) : null}
               </View>
@@ -217,9 +276,13 @@ export default function ChatScreen() {
         <Text style={[styles.paramChip, params.stream && { color: Colors.primary }]}>
           {params.stream ? 'Stream ON' : 'Stream OFF'}
         </Text>
+        {ragEnabled && ragDocuments.length > 0 ? (
+          <Text style={[styles.paramChip, { color: Colors.accent }]}>RAG:{ragDocuments.length}</Text>
+        ) : null}
       </View>
 
       <SettingsModal visible={showSettings} onClose={() => setShowSettings(false)} />
+      <RagModal visible={showRag} onClose={() => setShowRag(false)} />
     </SafeAreaView>
   );
 }
@@ -241,7 +304,7 @@ const styles = StyleSheet.create({
   },
   headerLeft: {
     flexDirection: 'row',
-    gap: Spacing.sm,
+    gap: Spacing.xs,
     width: 80,
   },
   headerCenter: {
@@ -257,15 +320,46 @@ const styles = StyleSheet.create({
   },
   headerRight: {
     flexDirection: 'row',
-    gap: Spacing.sm,
-    width: 80,
+    gap: Spacing.xs,
+    width: 140,
     justifyContent: 'flex-end',
   },
   headerBtn: {
-    width: 36,
-    height: 36,
+    width: 34,
+    height: 34,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  ctxBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+    backgroundColor: Colors.surfaceElevated,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.surfaceBorder,
+  },
+  ctxLabel: {
+    color: Colors.textMuted,
+    fontSize: FontSize.xs,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    minWidth: 200,
+  },
+  ctxTrack: {
+    flex: 1,
+    height: 4,
+    backgroundColor: Colors.surfaceBorder,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  ctxFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  ctxWarn: {
+    color: Colors.warning,
+    fontSize: FontSize.xs,
   },
   body: {
     flex: 1,
